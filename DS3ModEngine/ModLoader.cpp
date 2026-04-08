@@ -1,7 +1,7 @@
 #include "ModLoader.h"
 #include "Game.h"
 #include "AOBScanner.h"
-#include "LeoSpecial/LeoSpecial.h"
+#include "LeoSpecial.h"
 #include <stdio.h>
 #include <wchar.h>
 #include <Shlwapi.h>

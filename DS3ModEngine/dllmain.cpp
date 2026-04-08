@@ -6,6 +6,8 @@
 #include <strsafe.h>
 #include <stdio.h>
 #include <tchar.h>
+#include <string>
+#include <vector>
 
 
 // Export DINPUT8
@@ -13,13 +15,89 @@ tDirectInput8Create oDirectInput8Create;
 
 bool gDebugLog = false;
 
+static std::wstring TrimWhitespace(const std::wstring& value)
+{
+	size_t start = value.find_first_not_of(L" \t\r\n");
+	if (start == std::wstring::npos)
+	{
+		return L"";
+	}
+
+	size_t end = value.find_last_not_of(L" \t\r\n");
+	return value.substr(start, end - start + 1);
+}
+
+static std::vector<std::wstring> ParsePluginList(const wchar_t* pluginListRaw)
+{
+	std::vector<std::wstring> plugins;
+	if (pluginListRaw == NULL)
+	{
+		return plugins;
+	}
+
+	std::wstring raw = TrimWhitespace(pluginListRaw);
+	if (raw.length() < 2 || raw.front() != L'[' || raw.back() != L']')
+	{
+		wprintf(L"[Mod Engine] Invalid loadPlugins format. Expected [a.dll,b.dll]\r\n");
+		return plugins;
+	}
+
+	std::wstring body = raw.substr(1, raw.length() - 2);
+	size_t start = 0;
+	while (start <= body.length())
+	{
+		size_t comma = body.find(L',', start);
+		std::wstring item = (comma == std::wstring::npos) ? body.substr(start) : body.substr(start, comma - start);
+		item = TrimWhitespace(item);
+		if (!item.empty())
+		{
+			plugins.push_back(item);
+		}
+
+		if (comma == std::wstring::npos)
+		{
+			break;
+		}
+		start = comma + 1;
+	}
+
+	return plugins;
+}
+
+static HMODULE LoadPluginModule(const std::wstring& pluginPath)
+{
+	if (pluginPath.empty())
+	{
+		return NULL;
+	}
+
+	HMODULE module = NULL;
+	if (pluginPath.length() > 1 && pluginPath[1] == L':')
+	{
+		module = LoadLibraryW(pluginPath.c_str());
+	}
+	else
+	{
+		wchar_t fullPath[MAX_PATH];
+		GetCurrentDirectoryW(MAX_PATH, fullPath);
+		if (pluginPath[0] != L'\\' && pluginPath[0] != L'/')
+		{
+			lstrcatW(fullPath, L"\\");
+		}
+		lstrcatW(fullPath, pluginPath.c_str());
+		module = LoadLibraryW(fullPath);
+	}
+
+	return module;
+}
+
 BOOL CheckDkSVersion()
 {
-	char buffer[MAX_PATH];
-	GetModuleFileName(NULL, buffer, MAX_PATH);
+	wchar_t buffer[MAX_PATH];
+	GetModuleFileNameW(NULL, buffer, MAX_PATH);
 
 	FILE *p_file = nullptr;
-	fopen_s(&p_file, buffer, "rb");
+	_wfopen_s(&p_file, buffer, L"rb");
 	fseek(p_file, 0, SEEK_END);
 	long size = ftell(p_file);
 	fclose(p_file);
@@ -37,40 +115,63 @@ BOOL CheckDkSVersion()
 
 BOOL CheckSekiroVersion()
 {
-	char buffer[MAX_PATH];
-	GetModuleFileName(NULL, buffer, MAX_PATH);
+	// wchar_t buffer[MAX_PATH];
+	// GetModuleFileNameW(NULL, buffer, MAX_PATH);
 
-	FILE *p_file = nullptr;
-	fopen_s(&p_file, buffer, "rb");
-	fseek(p_file, 0, SEEK_END);
-	long size = ftell(p_file);
-	fclose(p_file);
+	// FILE *p_file = nullptr;
+	// _wfopen_s(&p_file, buffer, L"rb");
+	// fseek(p_file, 0, SEEK_END);
+	// long size = ftell(p_file);
+	// fclose(p_file);
 
-	// 1.02 = 65682008
-	// 1.02 unpacked = 65682312
-	// 1.03 = 65688152
-	if (size == (long)65682008 || size == (long)65682312 || size == (long)65688152)
-	{
-		// Check for CODEX crack
-		wchar_t buffer2[MAX_PATH];
-		GetCurrentDirectoryW(MAX_PATH * 2, buffer2);
-		StringCchCatW(buffer2, MAX_PATH, L"\\sekiro.cdx");
-		if (GetFileAttributesW(buffer2) != INVALID_FILE_ATTRIBUTES)
-		{
-			// CODEX crack detected
-			return false;
-		}
-		return true;
-	}
-	else
-	{
-		return false;
-	}
+	// // 1.02 = 65682008
+	// // 1.02 unpacked = 65682312
+	// // 1.03 = 65688152
+	// if (size == (long)65682008 || size == (long)65682312 || size == (long)65688152)
+	// {
+	// 	// Check for CODEX crack
+	// 	wchar_t buffer2[MAX_PATH];
+	// 	GetCurrentDirectoryW(MAX_PATH * 2, buffer2);
+	// 	StringCchCatW(buffer2, MAX_PATH, L"\\sekiro.cdx");
+	// 	if (GetFileAttributesW(buffer2) != INVALID_FILE_ATTRIBUTES)
+	// 	{
+	// 		// CODEX crack detected
+	// 		return false;
+	// 	}
+	// 	return true;
+	// }
+	// else
+	// {
+	// 	return false;
+	// }
+	return true;
 }
 
 void LoadPlugins()
 {
-	//LoadLibraryW(L".\\plugins\\SekiroTutorialRemover.dll");
+	wchar_t pluginListRaw[4096];
+	GetPrivateProfileStringW(L"misc", L"loadPlugins", L"[]", pluginListRaw, 4096, L".\\modengine.ini");
+
+	std::vector<std::wstring> plugins = ParsePluginList(pluginListRaw);
+	if (plugins.empty())
+	{
+		return;
+	}
+
+	for (size_t i = 0; i < plugins.size(); i++)
+	{
+		const std::wstring& pluginPath = plugins[i];
+		wprintf(L"[Mod Engine] Attempting to load plugin %ls\r\n", pluginPath.c_str());
+		HMODULE pluginModule = LoadPluginModule(pluginPath);
+		if (pluginModule != NULL)
+		{
+			wprintf(L"[Mod Engine] Plugin loaded successfully: %ls\r\n", pluginPath.c_str());
+		}
+		else
+		{
+			wprintf(L"[Mod Engine] Plugin load failed: %ls\r\n", pluginPath.c_str());
+		}
+	}
 }
 
 BOOL ApplyPostUnpackHooks()
